@@ -35,7 +35,7 @@ class MLPEncoder(Encoder):
 
         if self.factor: #CFL Using factor graph MLP encoder
             
-            x_adj = self.edge2node_adj(x, rel_rec, adj)
+            x = self.edge2node_adj(x, rel_rec, adj)
             
             # x = self.edge2node(x, rel_rec, rel_send) #CFL Matmul rec^T and divide by n_atoms, NRI 'accumulates all incoming edge features via a sum'
             x = self.mlp3(x)
