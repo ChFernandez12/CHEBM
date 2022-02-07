@@ -49,15 +49,15 @@ class Encoder(nn.Module):
     def edge2node(self, x, rel_rec, rel_send):
         """Based on https://github.com/ethanfetaya/NRI (MIT License)."""
         # NOTE: Assumes that we have the same graph across all samples.
-        incoming = torch.matmul(rel_rec.t(), x)
+        incoming = torch.matmul(rel_rec.t(), x) #CFL [5,20] x [128, 5, 256] #CFL TODO: Change for adjacency matrix
         return incoming / incoming.size(1)
 
     def node2edge(self, x, rel_rec, rel_send):
         """Based on https://github.com/ethanfetaya/NRI (MIT License)."""
         # NOTE: Assumes that we have the same graph across all samples.
-        receivers = torch.matmul(rel_rec, x)
+        receivers = torch.matmul(rel_rec, x) #CFL [20, 5] x [128, 5, 256] -- 128,20,256
         senders = torch.matmul(rel_send, x)
-        edges = torch.cat([senders,receivers], dim=2)
+        edges = torch.cat([senders,receivers], dim=2) #CFL 128,20,512
         return edges
 
     @abstractmethod

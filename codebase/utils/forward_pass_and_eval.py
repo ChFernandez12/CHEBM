@@ -164,7 +164,7 @@ def forward_pass_and_eval(
             inferred_width *= 2 * cmax
         else:
             ## model only the edges
-            logits = encoder(data_encoder, rel_rec, rel_send)
+            logits = encoder(data_encoder, rel_rec, rel_send) #CFL 128, 20, 2
     else:
         logits = edge_probs.unsqueeze(0).repeat(data_encoder.shape[0], 1, 1)
 

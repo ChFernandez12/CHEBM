@@ -198,7 +198,7 @@ if __name__ == "__main__":
     ) = data_loader.load_data(args)
 
     rel_rec, rel_send = utils.create_rel_rec_send(args, args.num_atoms)
-
+    # Encoder MLP by default
     encoder, decoder, optimizer, scheduler, edge_probs = model_loader.load_model(
         args, loc_max, loc_min, vel_max, vel_min
     )

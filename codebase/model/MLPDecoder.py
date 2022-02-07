@@ -40,7 +40,7 @@ class MLPDecoder(nn.Module):
 
         # single_timestep_inputs has shape
         # [batch_size, num_timesteps, num_atoms, num_dims]
-
+        #CFL 5 timestaps
         # single_timestep_rel_type has shape:
         # [batch_size, num_timesteps, num_atoms*(num_atoms-1), num_edge_types]
 
@@ -72,7 +72,7 @@ class MLPDecoder(nn.Module):
 
         # Aggregate all msgs to receiver
         agg_msgs = all_msgs.transpose(-2, -1).matmul(rel_rec).transpose(-2, -1)
-        agg_msgs = agg_msgs.contiguous()
+        agg_msgs = agg_msgs.contiguous() #CFL WTF
 
         # Skip connection
         aug_inputs = torch.cat([single_timestep_inputs, agg_msgs], dim=-1)

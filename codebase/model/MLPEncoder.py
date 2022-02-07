@@ -24,20 +24,20 @@ class MLPEncoder(Encoder):
         self.init_weights()
 
     def forward(self, inputs, rel_rec, rel_send):
-        # Input shape: [num_sims, num_atoms, num_timesteps, num_dims]
+        # Input shape: [num_sims, num_atoms, num_timesteps, num_dims] #CFL 128, 5, 49, 4
         x = inputs.view(inputs.size(0), inputs.size(1), -1)
         # New shape: [num_sims, num_atoms, num_timesteps*num_dims]
 
-        x = self.mlp1(x)  # 2-layer ELU net per node
-        x = self.node2edge(x, rel_rec, rel_send)
+        x = self.mlp1(x)  # 2-layer ELU net per node #CFL 128,5,256
+        x = self.node2edge(x, rel_rec, rel_send) #CFL matmul(rel_*, x) and concat sender and receivers for each atom,  NRI 'returns for each edge the concatenation of the receiver and sender features'
         x = self.mlp2(x)
         x_skip = x
 
-        if self.factor:
-            x = self.edge2node(x, rel_rec, rel_send)
+        if self.factor: #CFL Using factor graph MLP encoder
+            x = self.edge2node(x, rel_rec, rel_send) #CFL Matmul rec^T and divide by n_atoms, NRI 'accumulates all incoming edge features via a sum'
             x = self.mlp3(x)
             x = self.node2edge(x, rel_rec, rel_send)
-            x = torch.cat((x, x_skip), dim=2)  # Skip connection
+            x = torch.cat((x, x_skip), dim=2)  # Skip connection 
             x = self.mlp4(x)
         else:
             x = self.mlp3(x)
