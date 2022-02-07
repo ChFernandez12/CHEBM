@@ -23,7 +23,7 @@ class MLPEncoder(Encoder):
 
         self.init_weights()
 
-    def forward(self, inputs, rel_rec, rel_send):
+    def forward(self, inputs, rel_rec, rel_send, adj):
         # Input shape: [num_sims, num_atoms, num_timesteps, num_dims] #CFL 128, 5, 49, 4
         x = inputs.view(inputs.size(0), inputs.size(1), -1)
         # New shape: [num_sims, num_atoms, num_timesteps*num_dims]
@@ -34,7 +34,10 @@ class MLPEncoder(Encoder):
         x_skip = x
 
         if self.factor: #CFL Using factor graph MLP encoder
-            x = self.edge2node(x, rel_rec, rel_send) #CFL Matmul rec^T and divide by n_atoms, NRI 'accumulates all incoming edge features via a sum'
+            
+            x_adj = self.edge2node_adj(x, rel_rec, adj)
+            
+            # x = self.edge2node(x, rel_rec, rel_send) #CFL Matmul rec^T and divide by n_atoms, NRI 'accumulates all incoming edge features via a sum'
             x = self.mlp3(x)
             x = self.node2edge(x, rel_rec, rel_send)
             x = torch.cat((x, x_skip), dim=2)  # Skip connection 

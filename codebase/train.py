@@ -34,6 +34,7 @@ def train():
                 relations,
                 rel_rec,
                 rel_send,
+                adj,
                 args.hard,
                 edge_probs=edge_probs,
                 log_prior=log_prior,
@@ -197,8 +198,14 @@ if __name__ == "__main__":
         vel_min,
     ) = data_loader.load_data(args)
 
+    #adj = np.ones([args.num_atoms, args.num_atoms]) - np.eye(args.num_atoms) #CFL Create all connected adjacency matrix to test edge2node_adj TODO: 1. Change it for GT , 2. Random initialization
+    flat_adj = np.ones(args.num_atoms*args.num_atoms-args.num_atoms)
+    adj = torch.Tensor(flat_adj)
+    if args.cuda:
+        adj = adj.cuda()
+
     rel_rec, rel_send = utils.create_rel_rec_send(args, args.num_atoms)
-    # Encoder MLP by default
+    #CFL Encoder MLP by default
     encoder, decoder, optimizer, scheduler, edge_probs = model_loader.load_model(
         args, loc_max, loc_min, vel_max, vel_min
     )
