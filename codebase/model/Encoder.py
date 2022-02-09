@@ -58,7 +58,7 @@ class Encoder(nn.Module):
 
         rec_edges = torch.mul(rel_rec.t(), adj)
 
-        incoming = torch.matmul(rec_edges, x) #CFL [5,20] x [128, 20, 256] #CFL TODO: Change for adjacency matrix
+        incoming = torch.matmul(rec_edges, x) #CFL [128, 5, 20] x [128, 20, 256] #CFL TODO: Change for adjacency matrix
 
         return incoming / incoming.size(1)
 

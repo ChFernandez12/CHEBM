@@ -19,7 +19,7 @@ class MLPEncoder(Encoder):
         else:
             self.mlp4 = MLP(n_hid * 2, n_hid, n_hid, do_prob)
             print("Using MLP encoder.")
-        self.fc_out = nn.Linear(n_hid, n_out)
+        self.fc_out = nn.Linear(n_hid, 1)
 
         self.init_weights()
 
@@ -46,5 +46,5 @@ class MLPEncoder(Encoder):
             x = self.mlp3(x)
             x = torch.cat((x, x_skip), dim=2)  # Skip connection
             x = self.mlp4(x)
-
+        x = x.sum(1) #Sum node featues
         return self.fc_out(x)
