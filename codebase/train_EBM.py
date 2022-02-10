@@ -52,7 +52,7 @@ parser.add_argument('--save_interval', type=int, default=1, help='Interval (# of
 # parser.add_argument('--cuda', type=strtobool, default='false', help='Use cuda')
 # parser.add_argument('--unobserved', type=int, default=0, help='Unobserved')
 # parser.add_argument('--model_unobserved', type=int, default=0, help='Model_unobserved')
-parser.add_argument('--suffix', type=str, default='_springs5_s1000', choices=['_springs5_s1000'], help='Dataset name')
+parser.add_argument('--suffix', type=str, default='_springs5', choices=['_springs5'], help='Dataset name')
 # parser.add_argument('--batch_size_multiGPU', type=int, default=128, help='Batch size during training')
 # parser.add_argument('--datadir', type=str, default='data', help='Dataset name')
 # parser.add_argument('--load_temperatures', type=strtobool, default='false', help='Use cuda')
@@ -374,10 +374,10 @@ def train(model, train_dataloader, n_atom, device):
             data, relations, temperatures = data_loader.unpack_batches(args, batch)
             
             #TODO: Relations to flat_adj
-            flat_adj = np.ones(args.num_atoms*args.num_atoms-args.num_atoms)
-            adj = torch.Tensor(flat_adj)
-            if args.cuda:
-                adj = adj.cuda()
+            # flat_adj = np.ones(args.num_atoms*args.num_atoms-args.num_atoms)
+            # adj = torch.Tensor(flat_adj)
+            # if args.cuda:
+            #     adj = adj.cuda()
 
             pos_x = data #CFL [128, 5, 49, 4]
             pos_adj =  relations.unsqueeze(dim=1) #CFL [128, 20] #CFL Change it to (num_atoms*num_atoms)-num_atoms ?
@@ -391,11 +391,11 @@ def train(model, train_dataloader, n_atom, device):
 
             
             ### Langevin dynamics
-            neg_x = torch.rand(pos_x.shape[0], n_atom, args.timesteps, 4, device=device) * (1 + args.c) #CFL TODO: Change harcoded 4 (x,y,vx,vy)
-            neg_adj = torch.rand(pos_adj.shape[0], 1, n_atom * n_atom - n_atom, device=device)
+            # neg_x = torch.rand(pos_x.shape[0], n_atom, args.timesteps, 4, device=device) * (1 + args.c) #CFL TODO: Change harcoded 4 (x,y,vx,vy)
+            neg_adj = torch.rand(pos_adj.shape[0], 1, n_atom * n_atom - n_atom, device=device)  #CFL from an uniform distribution 
         
             #pos_adj = rescale_adj(pos_adj)
-            neg_x.requires_grad = True
+            # neg_x.requires_grad = True
             neg_adj.requires_grad = True
             
             
@@ -405,37 +405,37 @@ def train(model, train_dataloader, n_atom, device):
             
 
             
-            noise_x = torch.randn(neg_x.shape[0], n_atom, args.timesteps, 4, device=device)  # (128, 9, 5)
+            # noise_x = torch.randn(neg_x.shape[0], n_atom, args.timesteps, 4, device=device)  # (128, 9, 5)
             noise_adj = torch.randn(neg_adj.shape[0], 1, n_atom * n_atom - n_atom, device=device)  #(128, 4, 9, 9) 
             for k in range(args.sample_step):
 
-                noise_x.normal_(0, args.noise)
+                # noise_x.normal_(0, args.noise) #CFL fills noise_x wth normal distribution and std noise 
                 noise_adj.normal_(0, args.noise)
-                neg_x.data.add_(noise_x.data)
+                # neg_x.data.add_(noise_x.data)
                 neg_adj.data.add_(noise_adj.data)
 
-                neg_out = model(neg_x, rel_rec, rel_send, neg_adj)
+                neg_out = model(pos_x, rel_rec, rel_send, neg_adj)
 
                 # neg_out = model(neg_adj, neg_x)
-                neg_out.sum().backward()
+                neg_out.sum().backward() #CFL compute derivatives over a scalar (loss)
                 if args.clamp:
-                    neg_x.grad.data.clamp_(-0.01, 0.01)
+                    # neg_x.grad.data.clamp_(-0.01, 0.01)
                     neg_adj.grad.data.clamp_(-0.01, 0.01)
         
 
-                neg_x.data.add_(neg_x.grad.data, alpha=-args.step_size)
+                # neg_x.data.add_(neg_x.grad.data, alpha=-args.step_size)
                 neg_adj.data.add_(neg_adj.grad.data, alpha=-args.step_size)
 
-                neg_x.grad.detach_()
-                neg_x.grad.zero_()
+                # neg_x.grad.detach_()
+                # neg_x.grad.zero_()
                 neg_adj.grad.detach_()
                 neg_adj.grad.zero_()
                 
-                neg_x.data.clamp_(0, 1 + args.c)
+                # neg_x.data.clamp_(0, 1 + args.c)
                 neg_adj.data.clamp_(0, 1)
 
             ### Training by backprop
-            neg_x = neg_x.detach()
+            # neg_x = neg_x.detach()
             neg_adj = neg_adj.detach()
             requires_grad(parameters, True)
             model.train()
@@ -444,9 +444,8 @@ def train(model, train_dataloader, n_atom, device):
             
             
             pos_out = model(pos_x, rel_rec, rel_send, pos_adj)
-            neg_out = model(neg_x, rel_rec, rel_send, neg_adj)
+            neg_out = model(pos_x, rel_rec, rel_send, neg_adj) #CFL Positive x
             
-
             loss_reg = (pos_out ** 2 + neg_out ** 2)  # energy magnitudes regularizer
             loss_en = pos_out - neg_out  # loss for shaping energy function
 
@@ -455,7 +454,7 @@ def train(model, train_dataloader, n_atom, device):
             # print('BCE loss', bce_loss(neg_adj.float(), pos_adj.float() ))
             losses_bce.append(loss_bce)
 
-            loss = loss_en + args.alpha * loss_reg
+            loss = loss_en + args.alpha * loss_reg #+ loss_bce 
             loss = loss.mean()
             loss.backward()
             clip_grad(parameters, optimizer)
