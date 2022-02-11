@@ -5,13 +5,25 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "CHEBM",
+            "type": "python",
+            "request": "launch",
+            "cwd": "/home/christian/Causality/AmortizedCausalDiscovery/codebase",
+            "program": "train_EBM.py",
+            "console": "integratedTerminal",
+
+        },
+        {
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",
             "cwd": "/home/christian/Causality/AmortizedCausalDiscovery/codebase",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["--suffix", "_springs5_s1000"]
+            "args": [
+                "--suffix",
+                "_springs5_s1000"
+            ]
         }
     ]
 }

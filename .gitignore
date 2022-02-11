@@ -27,3 +27,5 @@ logs/
 journal/
 Session.vim
 *.swo
+.vscode/launch.json
+
