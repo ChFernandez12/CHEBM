@@ -24,6 +24,8 @@ from model import utils, model_loader
 
 import datetime
 
+from torch.utils.tensorboard import SummaryWriter
+
 
 ### Args
 parser = argparse.ArgumentParser()
@@ -52,7 +54,7 @@ parser.add_argument('--save_interval', type=int, default=1, help='Interval (# of
 # parser.add_argument('--cuda', type=strtobool, default='false', help='Use cuda')
 # parser.add_argument('--unobserved', type=int, default=0, help='Unobserved')
 # parser.add_argument('--model_unobserved', type=int, default=0, help='Model_unobserved')
-parser.add_argument('--suffix', type=str, default='_springs5', choices=['_springs5'], help='Dataset name')
+parser.add_argument('--suffix', type=str, default='_springs5', help='Dataset name')
 # parser.add_argument('--batch_size_multiGPU', type=int, default=128, help='Batch size during training')
 # parser.add_argument('--datadir', type=str, default='data', help='Dataset name')
 # parser.add_argument('--load_temperatures', type=strtobool, default='false', help='Use cuda')
@@ -465,6 +467,7 @@ def train(model, train_dataloader, n_atom, device):
             losses_en.append(loss_en.mean())
             losses.append(loss)
 
+
             
 
         
@@ -481,6 +484,12 @@ def train(model, train_dataloader, n_atom, device):
             print('==========================================')
         print('Epoch: {:03d}, Loss: {:.6f}, Energy Loss: {}, Regularizer Loss: {:.6f}, BCE Loss: {:.2f},  Sec/Epoch: {:.2f}'.format(epoch+1, (sum(losses)/len(losses)).item(), (sum(losses_en)/len(losses_en)).item(), (sum(losses_reg)/len(losses_reg)).item(), (sum(losses_bce)/len(losses_bce)).item(), t_end-t_start))
         print('==========================================')
+        #tensorboard
+        writer.add_scalar('train/loss', (sum(losses)/len(losses)).item(), epoch * len(train_dataloader) + i)
+        writer.add_scalar('train/Energy loss', (sum(losses)/len(losses)).item(), epoch * len(train_dataloader) + i)
+        writer.add_scalar('train/Regularizer loss', (sum(losses)/len(losses)).item(), epoch * len(train_dataloader) + i)
+        writer.add_scalar('train/BCE loss', (sum(losses)/len(losses)).item(), epoch * len(train_dataloader) + i)
+
 
 
 
@@ -561,6 +570,10 @@ if __name__ == '__main__':
     print(model)
     print('==========================================')
     model = model.to(device)
+    description = 'only_energy'
+    writer = SummaryWriter('runs/{}'.format(description))
+    # writer.add_graph(model)
+    
 
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
@@ -568,7 +581,7 @@ if __name__ == '__main__':
     ### Train
     train(model, train_loader, n_atom, device)
     print('FI')
-    
+    writer.close()
     
 
 

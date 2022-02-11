@@ -16,8 +16,8 @@ docs/_build/
 target/
 
 # generated data
-data/*.npy
-
+codebase/data/*.npy
+codebase/trained_models
 ##own
 .idea/
 *.ckpt
