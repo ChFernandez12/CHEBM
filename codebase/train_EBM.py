@@ -25,7 +25,7 @@ from model import utils, model_loader
 import datetime
 
 from torch.utils.tensorboard import SummaryWriter
-
+# from tensorboard.plugins.hparams import api as hp #TODO
 
 ### Args
 parser = argparse.ArgumentParser()
@@ -36,7 +36,7 @@ parser.add_argument('--depth', type=int, default=2, help='Number of graph conv l
 parser.add_argument('--add_self', type=strtobool, default='false', help='Add shortcut in graphconv')
 parser.add_argument('--dropout', type=float, default=0, help='Dropout rate')
 parser.add_argument('--swish', type=strtobool, default='true', help='Use swish as activation function')
-parser.add_argument('--batch_size', type=int, default=128, help='Batch size during training')
+parser.add_argument('--batch_size', type=int, default=512, help='Batch size during training')
 parser.add_argument('--shuffle', type=strtobool, default='true', help='Shuffle the data batch')
 parser.add_argument('--num_workers', type=int, default=0, help='Number of workers in the data loader')
 parser.add_argument('--c', type=float, default=0.5, help='Dequantization using uniform distribution of [0,c)')
@@ -65,7 +65,7 @@ parser.add_argument(
     help="If 0 use all data available, otherwise reduce number of samples to given number"
 )
 parser.add_argument(
-    "--GPU_to_use", type=int, default=None, help="GPU to use for training"
+    "--GPU_to_use", type=int, default=1, help="GPU to use for training"
 )
 
 ############## training hyperparameter ##############
@@ -306,7 +306,8 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-args.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+args.device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 args.factor = not args.no_factor
 args.validate = not args.no_validate
@@ -368,9 +369,11 @@ def train(model, train_dataloader, n_atom, device):
     for epoch in range(args.max_epochs):
         t_start = time.time()
         losses_reg = []
+        losses_bce = []
         losses_en = []
         losses = []
-        losses_bce = []
+        losses_mse = []
+        accuracies = []
         for i, batch in enumerate(tqdm(train_dataloader)):
 
             data, relations, temperatures = data_loader.unpack_batches(args, batch)
@@ -382,7 +385,7 @@ def train(model, train_dataloader, n_atom, device):
             #     adj = adj.cuda()
 
             pos_x = data #CFL [128, 5, 49, 4]
-            pos_adj =  relations.unsqueeze(dim=1) #CFL [128, 20] #CFL Change it to (num_atoms*num_atoms)-num_atoms ?
+            pos_adj =  relations.unsqueeze(dim=1).float() #CFL [128, 20] #CFL Change it to (num_atoms*num_atoms)-num_atoms ?
             # logits = model(data, rel_rec, rel_send, adj)
 
             # ### Dequantization
@@ -401,79 +404,79 @@ def train(model, train_dataloader, n_atom, device):
             neg_adj.requires_grad = True
             
             
-            
             requires_grad(parameters, False)
             model.eval()
             
 
             
             # noise_x = torch.randn(neg_x.shape[0], n_atom, args.timesteps, 4, device=device)  # (128, 9, 5)
+            #uniforme between 0 and 1
+            #TODO binaritzar adj edges
             noise_adj = torch.randn(neg_adj.shape[0], 1, n_atom * n_atom - n_atom, device=device)  #(128, 4, 9, 9) 
+            neg_adjs = []
             for k in range(args.sample_step):
-
-                # noise_x.normal_(0, args.noise) #CFL fills noise_x wth normal distribution and std noise 
-                noise_adj.normal_(0, args.noise)
-                # neg_x.data.add_(noise_x.data)
-                neg_adj.data.add_(noise_adj.data)
 
                 neg_out = model(pos_x, rel_rec, rel_send, neg_adj)
 
-                # neg_out = model(neg_adj, neg_x)
-                neg_out.sum().backward() #CFL compute derivatives over a scalar (loss)
-                if args.clamp:
-                    # neg_x.grad.data.clamp_(-0.01, 0.01)
-                    neg_adj.grad.data.clamp_(-0.01, 0.01)
-        
+                #neg_out.sum().backward() #CFL compute derivatives over a scalar (loss)
+                #Compute gradient neg_adj
+                adj_grad, = torch.autograd.grad([neg_out.sum()],[neg_adj], create_graph=True)
 
-                # neg_x.data.add_(neg_x.grad.data, alpha=-args.step_size)
-                neg_adj.data.add_(neg_adj.grad.data, alpha=-args.step_size)
-
-                # neg_x.grad.detach_()
-                # neg_x.grad.zero_()
-                neg_adj.grad.detach_()
-                neg_adj.grad.zero_()
+                #Step
+                neg_adj = neg_adj - args.step_size * adj_grad
                 
-                # neg_x.data.clamp_(0, 1 + args.c)
-                neg_adj.data.clamp_(0, 1)
+                #TODO: Change temperature
+                # neg_adj = torch.clamp(neg_adj, 0, 1)
+                neg_adj= torch.sigmoid( neg_adj * 10)
 
-            ### Training by backprop
-            # neg_x = neg_x.detach()
-            neg_adj = neg_adj.detach()
-            requires_grad(parameters, True)
-            model.train()
+                #Return only last step to backpropagate
+                if k >= args.sample_step - 1:
+                    neg_adjs.append(neg_adj)
+                
+                #Delete gradients
+                neg_adj = neg_adj.detach()
+                neg_adj.requires_grad = True
             
-            model.zero_grad()
-            
-            
+            #Energy of positive and negative adjacency
+            #TODO: Try with binary negative adjacency instead of uniform noise
             pos_out = model(pos_x, rel_rec, rel_send, pos_adj)
             neg_out = model(pos_x, rel_rec, rel_send, neg_adj) #CFL Positive x
-            
-            loss_reg = (pos_out ** 2 + neg_out ** 2)  # energy magnitudes regularizer
-            loss_en = pos_out - neg_out  # loss for shaping energy function
+
+            #Losses
+            loss_reg = (pos_out ** 2 + neg_out ** 2).mean()  # energy magnitudes regularizer
+            loss_en = pos_out.mean() - neg_out.mean()  # loss for shaping energy function
 
             bce_loss = BCELoss()
-            loss_bce = bce_loss(neg_adj.float(), pos_adj.float() )
-            # print('BCE loss', bce_loss(neg_adj.float(), pos_adj.float() ))
-            losses_bce.append(loss_bce)
+            loss_bce = bce_loss(neg_adjs[-1].float(), pos_adj.float() ).mean()
+            loss_mse = torch.pow(neg_adjs[-1]- pos_adj, 2).mean()
 
-            loss = loss_en + args.alpha * loss_reg #+ loss_bce 
-            loss = loss.mean()
+
+            loss = loss_bce  + loss_en + args.alpha * loss_reg #
+            # loss = loss.mean()
             loss.backward()
+
+            
             clip_grad(parameters, optimizer)
             optimizer.step()
-            
-
-            losses_reg.append(loss_reg.mean())
-            losses_en.append(loss_en.mean())
+        
+            losses_bce.append(loss_bce.detach())
+            losses_mse.append(loss_mse.detach())
+            losses_reg.append(loss_reg.detach())
+            losses_en.append(loss_en.detach())
             losses.append(loss)
 
+            #Metrics
+            train_acc = torch.sum(((neg_adj > 0.5)*torch.ones(neg_adj.shape).to(device) == pos_adj))/ (neg_adj.shape[0]*neg_adj.shape[1]*neg_adj.shape[2])
+            accuracies.append(train_acc)
+
 
             
-
-        
+        print('--------------')
+        print(pos_out)
+        print(neg_out)
+        print('--------------')
         print(neg_adj)
         print(pos_adj)
-            
             
         t_end = time.time()
         
@@ -482,13 +485,17 @@ def train(model, train_dataloader, n_atom, device):
             torch.save(model.state_dict(), os.path.join(args.save_dir, 'epoch_{}.pt'.format(epoch + 1)))
             print('Saving checkpoint at epoch ', epoch+1)
             print('==========================================')
-        print('Epoch: {:03d}, Loss: {:.6f}, Energy Loss: {}, Regularizer Loss: {:.6f}, BCE Loss: {:.2f},  Sec/Epoch: {:.2f}'.format(epoch+1, (sum(losses)/len(losses)).item(), (sum(losses_en)/len(losses_en)).item(), (sum(losses_reg)/len(losses_reg)).item(), (sum(losses_bce)/len(losses_bce)).item(), t_end-t_start))
+            
+        print('Epoch: {:03d}, Loss: {:.6f}, Energy Loss: {}, Regularizer Loss: {:.6f}, MSE Loss: {:.2f},  Sec/Epoch: {:.2f}'.format(epoch+1, (sum(losses)/len(losses)).item(), (sum(losses_en)/len(losses_en)).item(), (sum(losses_reg)/len(losses_reg)).item(), (sum(losses_mse)/len(losses_mse)).item(), t_end-t_start))
         print('==========================================')
         #tensorboard
         writer.add_scalar('train/loss', (sum(losses)/len(losses)).item(), epoch * len(train_dataloader) + i)
-        writer.add_scalar('train/Energy loss', (sum(losses)/len(losses)).item(), epoch * len(train_dataloader) + i)
-        writer.add_scalar('train/Regularizer loss', (sum(losses)/len(losses)).item(), epoch * len(train_dataloader) + i)
-        writer.add_scalar('train/BCE loss', (sum(losses)/len(losses)).item(), epoch * len(train_dataloader) + i)
+        writer.add_scalar('train/Energy loss', (sum(losses_en)/len(losses_en)).item(), epoch * len(train_dataloader) + i)
+        writer.add_scalar('train/Regularizer loss', (sum(losses_reg)/len(losses_reg)).item(), epoch * len(train_dataloader) + i)
+        writer.add_scalar('train/MSE loss', (sum(losses_mse)/len(losses_mse)).item(), epoch * len(train_dataloader) + i)
+        writer.add_scalar('train/accuracy', (sum(accuracies)/len(accuracies)).item(), epoch * len(train_dataloader) + i)
+        writer.add_scalar('train/BCE loss', (sum(losses_bce)/len(losses_bce)).item(), epoch * len(train_dataloader) + i)
+
 
 
 
@@ -570,8 +577,9 @@ if __name__ == '__main__':
     print(model)
     print('==========================================')
     model = model.to(device)
-    description = 'only_energy'
-    writer = SummaryWriter('runs/{}'.format(description))
+    description = 'energy_bce_100'
+    dt_string = datetime.datetime.now().strftime("%d%m%Y_%H%M%S")
+    writer = SummaryWriter('runs/{}/{}'.format(description,dt_string))
     # writer.add_graph(model)
     
 
