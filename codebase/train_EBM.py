@@ -42,12 +42,13 @@ parser.add_argument('--num_workers', type=int, default=0, help='Number of worker
 parser.add_argument('--c', type=float, default=0.5, help='Dequantization using uniform distribution of [0,c)')
 parser.add_argument('--alpha', type=float, default=1.0, help='Weight for energy magnitudes regularizer')
 parser.add_argument('--step_size', type=int, default=10, help='Step size in Langevin dynamics')
-parser.add_argument('--sample_step', type=int, default=30, help='Number of sample step in Langevin dynamics')
-parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
+parser.add_argument('--sample_step', type=int, default=3, help='Number of sample step in Langevin dynamics')
+parser.add_argument('--valid_sample_step', type=int, default=3, help='Number of sample step in Langevin dynamics')
+parser.add_argument('--lr', type=float, default=1e-6, help='Learning rate') #TODO descending learning rate
 parser.add_argument('--noise', type=float, default=0.005, help='The standard variance of the added noise during Langevin Dynamics')
 parser.add_argument('--clamp', type=strtobool, default='true', help='Clamp the data/gradient during Langevin Dynamics')
 parser.add_argument('--wd', type=float, default=0, help='Weight Decay')
-parser.add_argument('--max_epochs', type=int, default=100, help='Maximum training epochs')
+parser.add_argument('--max_epochs', type=int, default=500, help='Maximum training epochs')
 parser.add_argument('--save_dir', type=str, default='trained_models/qm9', help='Location for saving checkpoints')
 parser.add_argument('--save_interval', type=int, default=1, help='Interval (# of epochs) between saved checkpoints')
 # parser.add_argument('--num_atoms', type=int, default=5, help='Number of atoms')
@@ -363,9 +364,10 @@ def clip_grad(parameters, optimizer):
                 
   
         
-def train(model, train_dataloader, n_atom, device):
+def train(model, train_dataloader, valid_dataloader, n_atom, device):
     parameters = model.parameters()
     optimizer = Adam(parameters, lr=args.lr, betas=(0.0, 0.999), weight_decay=args.wd)
+    #TODO: call train for each epoch
     for epoch in range(args.max_epochs):
         t_start = time.time()
         losses_reg = []
@@ -437,6 +439,9 @@ def train(model, train_dataloader, n_atom, device):
                 neg_adj = neg_adj.detach()
                 neg_adj.requires_grad = True
             
+
+            model.train()
+            model.zero_grad()
             #Energy of positive and negative adjacency
             #TODO: Try with binary negative adjacency instead of uniform noise
             pos_out = model(pos_x, rel_rec, rel_send, pos_adj)
@@ -469,8 +474,80 @@ def train(model, train_dataloader, n_atom, device):
             train_acc = torch.sum(((neg_adj > 0.5)*torch.ones(neg_adj.shape).to(device) == pos_adj))/ (neg_adj.shape[0]*neg_adj.shape[1]*neg_adj.shape[2])
             accuracies.append(train_acc)
 
+        ######## VALIDATION ########
 
+        t_start = time.time()
+
+        losses_val_reg = []
+        losses_val_bce = []
+        losses_val_en = []
+        losses_val = []
+        losses_val_mse = []
+        accuracies_val = []
+
+        requires_grad(parameters, False)
+        model.eval()
+
+        for i, batch in enumerate(tqdm(valid_dataloader)):
+
+            data, relations, temperatures = data_loader.unpack_batches(args, batch)
+
+            pos_x = data #CFL [128, 5, 49, 4]
+            pos_adj =  relations.unsqueeze(dim=1).float() #CFL [128, 20] #CFL Change it to (num_atoms*num_atoms)-num_atoms ?
+            neg_adj = torch.rand(pos_adj.shape[0], 1, n_atom * n_atom - n_atom, device=device)  #CFL from an uniform distribution 
+
+            neg_adj.requires_grad = True
+
+            #uniforme between 0 and 1
+            #TODO binaritzar adj edges
+            noise_adj = torch.randn(neg_adj.shape[0], 1, n_atom * n_atom - n_atom, device=device)  #(128, 4, 9, 9) 
+            neg_adjs = []
+            for k in range(args.valid_sample_step):
+
+                neg_out = model(pos_x, rel_rec, rel_send, neg_adj)
+
+                #Compute gradient neg_adj
+                adj_grad, = torch.autograd.grad([neg_out.sum()],[neg_adj], create_graph=True)
+
+                #Step
+                neg_adj = neg_adj - args.step_size * adj_grad
+                
+                #TODO: Change temperature
+                # neg_adj = torch.clamp(neg_adj, 0, 1)
+                neg_adj= torch.sigmoid( neg_adj * 10)
+                
+                #Delete gradients
+                neg_adj = neg_adj.detach()
+                neg_adj.requires_grad = True
+
+            neg_adj = neg_adj.detach()
             
+            #Energy of positive and negative adjacency
+            #TODO: Try with binary negative adjacency instead of uniform noise
+            pos_out = model(pos_x, rel_rec, rel_send, pos_adj)
+            neg_out = model(pos_x, rel_rec, rel_send, neg_adj) #CFL Positive x
+
+            #Losses
+            loss_reg = (pos_out ** 2 + neg_out ** 2).mean()  # energy magnitudes regularizer
+            loss_en = pos_out.mean() - neg_out.mean()  # loss for shaping energy function
+
+            bce_loss = BCELoss()
+            loss_bce = bce_loss(neg_adj.float(), pos_adj.float() ).mean()
+            loss_mse = torch.pow(neg_adj- pos_adj, 2).mean()
+
+
+            loss = loss_bce  + loss_en + args.alpha * loss_reg 
+                    
+            losses_val_bce.append(loss_bce.detach())
+            losses_val_mse.append(loss_mse.detach())
+            losses_val_reg.append(loss_reg.detach())
+            losses_val_en.append(loss_en.detach())
+            losses_val.append(loss)
+
+            #Metrics
+            train_acc = torch.sum(((neg_adj > 0.5)*torch.ones(neg_adj.shape).to(device) == pos_adj))/ (neg_adj.shape[0]*neg_adj.shape[1]*neg_adj.shape[2])
+            accuracies_val.append(train_acc)
+
         print('--------------')
         print(pos_out)
         print(neg_out)
@@ -495,6 +572,13 @@ def train(model, train_dataloader, n_atom, device):
         writer.add_scalar('train/MSE loss', (sum(losses_mse)/len(losses_mse)).item(), epoch * len(train_dataloader) + i)
         writer.add_scalar('train/accuracy', (sum(accuracies)/len(accuracies)).item(), epoch * len(train_dataloader) + i)
         writer.add_scalar('train/BCE loss', (sum(losses_bce)/len(losses_bce)).item(), epoch * len(train_dataloader) + i)
+
+        writer.add_scalar('val/loss', (sum(losses_val)/len(losses_val)).item(), epoch * len(valid_dataloader) + i)
+        writer.add_scalar('val/Energy loss', (sum(losses_val_en)/len(losses_val_en)).item(), epoch * len(valid_dataloader) + i)
+        writer.add_scalar('val/Regularizer loss', (sum(losses_val_reg)/len(losses_val_reg)).item(), epoch * len(valid_dataloader) + i)
+        writer.add_scalar('val/MSE loss', (sum(losses_val_mse)/len(losses_val_mse)).item(), epoch * len(valid_dataloader) + i)
+        writer.add_scalar('val/accuracy', (sum(accuracies_val)/len(accuracies_val)).item(), epoch * len(valid_dataloader) + i)
+        writer.add_scalar('val/BCE loss', (sum(losses_val_bce)/len(losses_val_bce)).item(), epoch * len(valid_dataloader) + i)
 
 
 
@@ -587,7 +671,7 @@ if __name__ == '__main__':
         os.makedirs(args.save_dir)
     
     ### Train
-    train(model, train_loader, n_atom, device)
+    train(model, train_loader, valid_loader, n_atom, device)
     print('FI')
     writer.close()
     
