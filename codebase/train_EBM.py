@@ -8,7 +8,10 @@ import random
 import torch
 from torch.optim import Adam
 from texttable import Texttable
+from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader, random_split, Subset
+
+
 from distutils.util import strtobool
 import numpy as np
 from torch.nn import BCELoss
@@ -44,11 +47,11 @@ parser.add_argument('--alpha', type=float, default=1.0, help='Weight for energy 
 parser.add_argument('--step_size', type=int, default=10, help='Step size in Langevin dynamics')
 parser.add_argument('--sample_step', type=int, default=3, help='Number of sample step in Langevin dynamics')
 parser.add_argument('--valid_sample_step', type=int, default=3, help='Number of sample step in Langevin dynamics')
-parser.add_argument('--lr', type=float, default=1e-6, help='Learning rate') #TODO descending learning rate
+parser.add_argument('--lr', type=float, default=3e-4, help='Learning rate') #TODO descending learning rate
 parser.add_argument('--noise', type=float, default=0.005, help='The standard variance of the added noise during Langevin Dynamics')
 parser.add_argument('--clamp', type=strtobool, default='true', help='Clamp the data/gradient during Langevin Dynamics')
 parser.add_argument('--wd', type=float, default=0, help='Weight Decay')
-parser.add_argument('--max_epochs', type=int, default=500, help='Maximum training epochs')
+parser.add_argument('--max_epochs', type=int, default=100, help='Maximum training epochs')
 parser.add_argument('--save_dir', type=str, default='trained_models/qm9', help='Location for saving checkpoints')
 parser.add_argument('--save_interval', type=int, default=1, help='Interval (# of epochs) between saved checkpoints')
 # parser.add_argument('--num_atoms', type=int, default=5, help='Number of atoms')
@@ -77,10 +80,10 @@ parser.add_argument(
 parser.add_argument(
     "--lr_decay",
     type=int,
-    default=200,
+    default=25,
     help="After how epochs to decay LR by a factor of gamma.",
 )
-parser.add_argument("--gamma", type=float, default=0.5, help="LR decay factor.")
+parser.add_argument("--gamma", type=float, default=0.01, help="LR decay factor.")
 parser.add_argument(
     "--training_samples", type=int, default=0,
     help="If 0 use all data available, otherwise reduce number of samples to given number"
@@ -361,12 +364,14 @@ def clip_grad(parameters, optimizer):
                 bound = 3 * torch.sqrt(exp_avg_sq / (1 - beta2 ** step)) + 0.1
                 p.grad.data.copy_(torch.max(torch.min(p.grad.data, bound), -bound))
 
-                
-  
         
 def train(model, train_dataloader, valid_dataloader, n_atom, device):
     parameters = model.parameters()
     optimizer = Adam(parameters, lr=args.lr, betas=(0.0, 0.999), weight_decay=args.wd)
+
+    scheduler = lr_scheduler.StepLR(
+        optimizer, step_size=args.lr_decay, gamma=args.gamma
+    )
     #TODO: call train for each epoch
     for epoch in range(args.max_epochs):
         t_start = time.time()
@@ -400,7 +405,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             ### Langevin dynamics
             # neg_x = torch.rand(pos_x.shape[0], n_atom, args.timesteps, 4, device=device) * (1 + args.c) #CFL TODO: Change harcoded 4 (x,y,vx,vy)
             neg_adj = torch.rand(pos_adj.shape[0], 1, n_atom * n_atom - n_atom, device=device)  #CFL from an uniform distribution 
-        
+            # neg_adj = torch.bernoulli(neg_adj)
             #pos_adj = rescale_adj(pos_adj)
             # neg_x.requires_grad = True
             neg_adj.requires_grad = True
@@ -456,7 +461,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             loss_mse = torch.pow(neg_adjs[-1]- pos_adj, 2).mean()
 
 
-            loss = loss_bce  + loss_en + args.alpha * loss_reg #
+            loss = loss_bce + loss_en + args.alpha * loss_reg #
             # loss = loss.mean()
             loss.backward()
 
@@ -474,6 +479,8 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             train_acc = torch.sum(((neg_adj > 0.5)*torch.ones(neg_adj.shape).to(device) == pos_adj))/ (neg_adj.shape[0]*neg_adj.shape[1]*neg_adj.shape[2])
             accuracies.append(train_acc)
 
+        scheduler.step()
+    
         ######## VALIDATION ########
 
         t_start = time.time()
@@ -487,7 +494,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
 
         requires_grad(parameters, False)
         model.eval()
-
+        
         for i, batch in enumerate(tqdm(valid_dataloader)):
 
             data, relations, temperatures = data_loader.unpack_batches(args, batch)
@@ -554,7 +561,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         print('--------------')
         print(neg_adj)
         print(pos_adj)
-            
+        
         t_end = time.time()
         
         ### Save checkpoints
@@ -572,14 +579,14 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         writer.add_scalar('train/MSE loss', (sum(losses_mse)/len(losses_mse)).item(), epoch * len(train_dataloader) + i)
         writer.add_scalar('train/accuracy', (sum(accuracies)/len(accuracies)).item(), epoch * len(train_dataloader) + i)
         writer.add_scalar('train/BCE loss', (sum(losses_bce)/len(losses_bce)).item(), epoch * len(train_dataloader) + i)
-
+        
         writer.add_scalar('val/loss', (sum(losses_val)/len(losses_val)).item(), epoch * len(valid_dataloader) + i)
         writer.add_scalar('val/Energy loss', (sum(losses_val_en)/len(losses_val_en)).item(), epoch * len(valid_dataloader) + i)
         writer.add_scalar('val/Regularizer loss', (sum(losses_val_reg)/len(losses_val_reg)).item(), epoch * len(valid_dataloader) + i)
         writer.add_scalar('val/MSE loss', (sum(losses_val_mse)/len(losses_val_mse)).item(), epoch * len(valid_dataloader) + i)
         writer.add_scalar('val/accuracy', (sum(accuracies_val)/len(accuracies_val)).item(), epoch * len(valid_dataloader) + i)
         writer.add_scalar('val/BCE loss', (sum(losses_val_bce)/len(losses_val_bce)).item(), epoch * len(valid_dataloader) + i)
-
+        
 
 
 
@@ -593,38 +600,11 @@ if __name__ == '__main__':
 
     if args.data_name=="qm9":
 
-    #     data_file = "qm9_relgcn_kekulized_ggnp.npz"
-    #     transform_fn = transform_qm9.transform_fn
-    #     atomic_num_list = [6, 7, 8, 9, 0]
-    #     file_path = '../datasets/valid_idx_qm9.json'
-    #     valid_idx = transform_qm9.get_val_ids(file_path)
-    #     n_atom_type = 5
-    #     n_atom = 9
-    #     n_edge_type = 4
-    # elif args.data_name=="zinc250k":
-    #     data_file = "zinc250k_relgcn_kekulized_ggnp.npz"
-    #     transform_fn = transform_zinc250k.transform_fn
-    #     atomic_num_list = transform_zinc250k.zinc250_atomic_num_list
-    #     file_path = '../datasets/valid_idx_zinc250k.json'
-    #     valid_idx = transform_zinc250k.get_val_ids(file_path)
-    #     n_atom_type = len(atomic_num_list) #10
         n_atom = 5
-    #     n_edge_type = 4
         print("no data")
     else:
         print("This dataset name is not supported!")
 
-
-    # dataset = NumpyTupleDataset.load(os.path.join(args.data_dir, data_file), transform=transform_fn) # 133885
-    # if len(valid_idx) > 0:
-    #     train_idx = [t for t in range(len(dataset)) if t not in valid_idx]  # 120803 = 133885-13082
-    #     train_set = Subset(dataset, train_idx)  # 120,803
-    #     test_set = Subset(dataset, valid_idx)  # 13,082
-    # else:
-    #     torch.manual_seed(args.seed)
-    #     train_set, test_set = random_split(dataset, [int(len(dataset) * 0.8), len(dataset) - int(len(dataset) * 0.8)])
-
-    # train_dataloader = DataLoader(train_set, batch_size=args.batch_size, shuffle=args.shuffle, num_workers=args.num_workers)
 
     (
         train_loader,
@@ -652,9 +632,12 @@ if __name__ == '__main__':
 
     rel_rec, rel_send = utils.create_rel_rec_send(args, args.num_atoms)
     #CFL Encoder MLP by default
-    model, _, optimizer, scheduler, edge_probs = model_loader.load_model(
-        args, loc_max, loc_min, vel_max, vel_min
-    )
+    # model, _, _, _, _ = model_loader.load_model(
+    #     args, loc_max, loc_min, vel_max, vel_min
+    # )
+    model = model_loader.load_encoder(args)
+
+
 
     ### Initialize model
     # model = GraphEBM(n_atom_type, args.hidden, n_edge_type, args.swish, args.depth, add_self=args.add_self, dropout = args.dropout)
