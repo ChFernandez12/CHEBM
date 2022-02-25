@@ -65,7 +65,7 @@ def load_encoder(args):
                 args.factor,
             )
 
-    encoder, num_GPU = utils.distribute_over_GPUs(args, encoder, num_GPU=args.num_GPU)
+    # encoder, num_GPU = utils.distribute_over_GPUs(args, encoder, num_GPU=args.num_GPU)
     if args.load_folder:
         print("Loading model file")
         args.encoder_file = os.path.join(args.load_folder, "encoder.pt")
@@ -114,7 +114,7 @@ def load_decoder(args, loc_max, loc_min, vel_max, vel_min):
         elif args.decoder == "sim":
             decoder = SimulationDecoder(loc_max, loc_min, vel_max, vel_min, args.suffix)
 
-    decoder, num_GPU = utils.distribute_over_GPUs(args, decoder, num_GPU=args.num_GPU)
+    #decoder, num_GPU = utils.distribute_over_GPUs(args, decoder, num_GPU=args.num_GPU)
     # print("Let's use", num_GPU, "GPUs!")
 
     if args.load_folder:

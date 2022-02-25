@@ -131,7 +131,7 @@ def edge_accuracy(preds, target, binary=True):
 
 
 def calc_auroc(pred_edges, GT_edges):
-    pred_edges = 1 - pred_edges[:, :, 0]
+    #pred_edges = 1 - pred_edges[:, :, 0]
     return roc_auc_score(
         GT_edges.cpu().detach().flatten(),
         pred_edges.cpu().detach().flatten(),  # [:, :, 1]
@@ -233,7 +233,7 @@ def distribute_over_GPUs(args, model, num_GPU=None):
             assert (
                 num_GPU <= torch.cuda.device_count()
             ), "You cant use more GPUs than you have."
-            model = torch.nn.DataParallel(model, device_ids=list(range(num_GPU)))
+            model = torch.nn.DataParallel(model, args.GPU_to_use)
             args.batch_size_multiGPU = args.batch_size * num_GPU
     else:
         model = torch.nn.DataParallel(model)

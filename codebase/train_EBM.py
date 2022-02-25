@@ -51,7 +51,7 @@ parser.add_argument('--lr', type=float, default=3e-4, help='Learning rate') #TOD
 parser.add_argument('--noise', type=float, default=0.005, help='The standard variance of the added noise during Langevin Dynamics')
 parser.add_argument('--clamp', type=strtobool, default='true', help='Clamp the data/gradient during Langevin Dynamics')
 parser.add_argument('--wd', type=float, default=0, help='Weight Decay')
-parser.add_argument('--max_epochs', type=int, default=100, help='Maximum training epochs')
+parser.add_argument('--max_epochs', type=int, default=3000, help='Maximum training epochs')
 parser.add_argument('--save_dir', type=str, default='trained_models/qm9', help='Location for saving checkpoints')
 parser.add_argument('--save_interval', type=int, default=1, help='Interval (# of epochs) between saved checkpoints')
 # parser.add_argument('--num_atoms', type=int, default=5, help='Number of atoms')
@@ -80,10 +80,10 @@ parser.add_argument(
 parser.add_argument(
     "--lr_decay",
     type=int,
-    default=25,
+    default=100,
     help="After how epochs to decay LR by a factor of gamma.",
 )
-parser.add_argument("--gamma", type=float, default=0.01, help="LR decay factor.")
+parser.add_argument("--gamma", type=float, default=0.1, help="LR decay factor.")
 parser.add_argument(
     "--training_samples", type=int, default=0,
     help="If 0 use all data available, otherwise reduce number of samples to given number"
@@ -381,6 +381,9 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         losses = []
         losses_mse = []
         accuracies = []
+        auroc = []
+        auroc_val = []
+
         for i, batch in enumerate(tqdm(train_dataloader)):
 
             data, relations, temperatures = data_loader.unpack_batches(args, batch)
@@ -475,12 +478,15 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             losses_en.append(loss_en.detach())
             losses.append(loss)
 
+
             #Metrics
             train_acc = torch.sum(((neg_adj > 0.5)*torch.ones(neg_adj.shape).to(device) == pos_adj))/ (neg_adj.shape[0]*neg_adj.shape[1]*neg_adj.shape[2])
             accuracies.append(train_acc)
+            auroc.append(utils.calc_auroc(neg_adj,pos_adj ))
 
-        scheduler.step()
-    
+
+        #scheduler.step()
+        
         ######## VALIDATION ########
 
         t_start = time.time()
@@ -492,7 +498,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         losses_val_mse = []
         accuracies_val = []
 
-        requires_grad(parameters, False)
+        #requires_grad(parameters, False)
         model.eval()
         
         for i, batch in enumerate(tqdm(valid_dataloader)):
@@ -531,8 +537,9 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             
             #Energy of positive and negative adjacency
             #TODO: Try with binary negative adjacency instead of uniform noise
-            pos_out = model(pos_x, rel_rec, rel_send, pos_adj)
-            neg_out = model(pos_x, rel_rec, rel_send, neg_adj) #CFL Positive x
+            model.eval()
+            pos_out = model(pos_x, rel_rec, rel_send, pos_adj).detach()
+            neg_out = model(pos_x, rel_rec, rel_send, neg_adj).detach() #CFL Positive x
 
             #Losses
             loss_reg = (pos_out ** 2 + neg_out ** 2).mean()  # energy magnitudes regularizer
@@ -554,6 +561,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             #Metrics
             train_acc = torch.sum(((neg_adj > 0.5)*torch.ones(neg_adj.shape).to(device) == pos_adj))/ (neg_adj.shape[0]*neg_adj.shape[1]*neg_adj.shape[2])
             accuracies_val.append(train_acc)
+            auroc_val.append(utils.calc_auroc(neg_adj,pos_adj ))
 
         print('--------------')
         print(pos_out)
@@ -566,7 +574,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         
         ### Save checkpoints
         if (epoch+1) % args.save_interval == 0:
-            torch.save(model.state_dict(), os.path.join(args.save_dir, 'epoch_{}.pt'.format(epoch + 1)))
+            torch.save(model.state_dict(), os.path.join(args.save_dir + '/' + args.expername , 'epoch_{}.pt'.format(epoch + 1)))
             print('Saving checkpoint at epoch ', epoch+1)
             print('==========================================')
             
@@ -579,6 +587,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         writer.add_scalar('train/MSE loss', (sum(losses_mse)/len(losses_mse)).item(), epoch * len(train_dataloader) + i)
         writer.add_scalar('train/accuracy', (sum(accuracies)/len(accuracies)).item(), epoch * len(train_dataloader) + i)
         writer.add_scalar('train/BCE loss', (sum(losses_bce)/len(losses_bce)).item(), epoch * len(train_dataloader) + i)
+        writer.add_scalar('train/AUROC', (sum(auroc)/len(auroc)).item(), epoch * len(train_dataloader) + i)
         
         writer.add_scalar('val/loss', (sum(losses_val)/len(losses_val)).item(), epoch * len(valid_dataloader) + i)
         writer.add_scalar('val/Energy loss', (sum(losses_val_en)/len(losses_val_en)).item(), epoch * len(valid_dataloader) + i)
@@ -586,6 +595,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         writer.add_scalar('val/MSE loss', (sum(losses_val_mse)/len(losses_val_mse)).item(), epoch * len(valid_dataloader) + i)
         writer.add_scalar('val/accuracy', (sum(accuracies_val)/len(accuracies_val)).item(), epoch * len(valid_dataloader) + i)
         writer.add_scalar('val/BCE loss', (sum(losses_val_bce)/len(losses_val_bce)).item(), epoch * len(valid_dataloader) + i)
+        writer.add_scalar('val/AUROC', (sum(auroc_val)/len(auroc_val)).item(), epoch * len(valid_dataloader) + i)
         
 
 
@@ -644,14 +654,15 @@ if __name__ == '__main__':
     print(model)
     print('==========================================')
     model = model.to(device)
-    description = 'energy_bce_100'
+    
+    description = 'energy_bce_1e3'
     dt_string = datetime.datetime.now().strftime("%d%m%Y_%H%M%S")
-    writer = SummaryWriter('runs/{}/{}'.format(description,dt_string))
+    writer = SummaryWriter('runs/{}/{}'.format(args.expername,dt_string))
     # writer.add_graph(model)
     
 
-    if not os.path.exists(args.save_dir):
-        os.makedirs(args.save_dir)
+    if not os.path.exists(args.save_dir + '/' + args.expername):
+        os.makedirs(args.save_dir+ '/' + args.expername)
     
     ### Train
     train(model, train_loader, valid_loader, n_atom, device)
