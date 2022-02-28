@@ -2,40 +2,68 @@ import argparse
 import torch
 import datetime
 import numpy as np
+from distutils.util import strtobool
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=42, help="Random seed.")
+    parser.add_argument('--seed', type=int, default=0, help='Random seed to use')
+    parser.add_argument('--data_name', type=str, default='qm9', choices=['qm9', 'zinc250k'], help='Dataset name')
+    parser.add_argument('--hidden', type=int, default=64, help='Hidden dimension')
+    parser.add_argument('--depth', type=int, default=2, help='Number of graph conv layers')
+    parser.add_argument('--add_self', type=strtobool, default='false', help='Add shortcut in graphconv')
+    parser.add_argument('--dropout', type=float, default=0, help='Dropout rate')
+    parser.add_argument('--swish', type=strtobool, default='true', help='Use swish as activation function')
+    parser.add_argument('--batch_size', type=int, default=512, help='Batch size during training')
+    parser.add_argument('--shuffle', type=strtobool, default='true', help='Shuffle the data batch')
+    parser.add_argument('--num_workers', type=int, default=0, help='Number of workers in the data loader')
+    parser.add_argument('--c', type=float, default=0.5, help='Dequantization using uniform distribution of [0,c)')
+    parser.add_argument('--alpha', type=float, default=1.0, help='Weight for energy magnitudes regularizer')
+    parser.add_argument('--step_size', type=int, default=10, help='Step size in Langevin dynamics')
+    parser.add_argument('--sample_step', type=int, default=3, help='Number of sample step in Langevin dynamics')
+    parser.add_argument('--valid_sample_step', type=int, default=3, help='Number of sample step in Langevin dynamics')
+    parser.add_argument('--lr', type=float, default=3e-4, help='Learning rate') #TODO descending learning rate
+    parser.add_argument('--noise', type=float, default=0.005, help='The standard variance of the added noise during Langevin Dynamics')
+    parser.add_argument('--clamp', type=strtobool, default='true', help='Clamp the data/gradient during Langevin Dynamics')
+    parser.add_argument('--wd', type=float, default=0, help='Weight Decay')
+    parser.add_argument('--max_epochs', type=int, default=3000, help='Maximum training epochs')
+    parser.add_argument('--save_dir', type=str, default='trained_models/qm9', help='Location for saving checkpoints')
+    parser.add_argument('--save_interval', type=int, default=1, help='Interval (# of epochs) between saved checkpoints')
+    # parser.add_argument('--num_atoms', type=int, default=5, help='Number of atoms')
+    # parser.add_argument('--cuda', type=strtobool, default='false', help='Use cuda')
+    # parser.add_argument('--unobserved', type=int, default=0, help='Unobserved')
+    # parser.add_argument('--model_unobserved', type=int, default=0, help='Model_unobserved')
+    parser.add_argument('--suffix', type=str, default='_springs5', help='Dataset name')
+    # parser.add_argument('--batch_size_multiGPU', type=int, default=128, help='Batch size during training')
+    # parser.add_argument('--datadir', type=str, default='data', help='Dataset name')
+    # parser.add_argument('--load_temperatures', type=strtobool, default='false', help='Use cuda')
+    # parser.add_argument("--training_samples", type=int, default=0, help="If 0 use all data available, otherwise reduce number of samples to given number")
+
     parser.add_argument(
-        "--GPU_to_use", type=int, default=None, help="GPU to use for training"
+        "--test_samples", type=int, default=0,
+        help="If 0 use all data available, otherwise reduce number of samples to given number"
+    )
+    parser.add_argument(
+        "--GPU_to_use", type=int, default=2, help="GPU to use for training"
     )
 
     ############## training hyperparameter ##############
     parser.add_argument(
         "--epochs", type=int, default=500, help="Number of epochs to train."
     )
-    parser.add_argument(
-        "--batch_size", type=int, default=128, help="Number of samples per batch."
-    )
-    parser.add_argument(
-        "--lr", type=float, default=0.0005, help="Initial learning rate."
-    )
+
     parser.add_argument(
         "--lr_decay",
         type=int,
-        default=200,
+        default=100,
         help="After how epochs to decay LR by a factor of gamma.",
     )
-    parser.add_argument("--gamma", type=float, default=0.5, help="LR decay factor.")
+    parser.add_argument("--gamma", type=float, default=0.1, help="LR decay factor.")
     parser.add_argument(
         "--training_samples", type=int, default=0,
         help="If 0 use all data available, otherwise reduce number of samples to given number"
     )
-    parser.add_argument(
-        "--test_samples", type=int, default=0,
-        help="If 0 use all data available, otherwise reduce number of samples to given number"
-    )
+
     parser.add_argument(
         "--prediction_steps",
         type=int,
@@ -102,12 +130,7 @@ def parse_args():
         help="Should we load temperature data?",
         action="store_true",
     )
-    parser.add_argument(
-        "--alpha",
-        type=float,
-        default=2,
-        help="Middle value of temperature distribution.",
-    )
+
     parser.add_argument(
         "--num_cats",
         type=int,
@@ -146,12 +169,7 @@ def parse_args():
     )
 
     ############## loading and saving ##############
-    parser.add_argument(
-        "--suffix",
-        type=str,
-        default="_springs5",
-        help='Suffix for training data.',
-    )
+
     parser.add_argument(
         "--timesteps", type=int, default=49, help="Number of timesteps in input."
     )
@@ -223,6 +241,12 @@ def parse_args():
         help="If given as argument, do not skip first edge type in decoder, i.e. it represents no-edge.",
     )
     parser.add_argument(
+        "skip_first",
+        action="store_true",
+        default=False,
+        help="If given as argument, do not skip first edge type in decoder, i.e. it represents no-edge.",
+    )
+    parser.add_argument(
         "--temp", type=float, default=0.5, help="Temperature for Gumbel softmax."
     )
     parser.add_argument(
@@ -257,26 +281,12 @@ def parse_args():
         help="Disables factor graph model.",
     )
 
+
     args = parser.parse_args()
-    args.test = True
 
-    ### Presets for different datasets ###
-    if (
-        "fixed" in args.suffix
-        or "uninfluenced" in args.suffix
-        or "influencer" in args.suffix
-        or "conf" in args.suffix
-    ):
-        args.dont_shuffle_unobserved = True
 
-    if "netsim" in args.suffix:
-        args.dims = 1
-        args.num_atoms = 15
-        args.timesteps = 200
-        args.no_validate = True
-        args.test = False
+    args.device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
-    args.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     args.factor = not args.no_factor
     args.validate = not args.no_validate
@@ -284,9 +294,6 @@ def parse_args():
     args.skip_first = not args.dont_skip_first
     args.use_encoder = not args.dont_use_encoder
     args.time = datetime.datetime.now().isoformat()
-
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
 
     if args.device.type != "cpu":
         if args.GPU_to_use is not None:
@@ -297,5 +304,6 @@ def parse_args():
     else:
         args.num_GPU = None
         args.batch_size_multiGPU = args.batch_size
+
 
     return args
