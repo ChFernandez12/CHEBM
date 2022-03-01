@@ -19,7 +19,7 @@ class MLPEncoder(Encoder):
         else:
             self.mlp4 = MLP(n_hid * 2, n_hid, n_hid, do_prob)
             print("Using MLP encoder.")
-        self.fc_out = nn.Linear(n_hid, 1)
+        self.fc_out = spectral_norm(nn.Linear(n_hid, 1))
 
         self.init_weights()
 
