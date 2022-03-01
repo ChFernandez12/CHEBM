@@ -83,10 +83,8 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         losses_mse = []
         accuracies = []
         auroc = []
-        auroc_val = []
 
         for i, batch in enumerate(tqdm(train_dataloader)):
-
             data, relations, temperatures = data_loader.unpack_batches(args, batch)
             
             #TODO: Relations to flat_adj
@@ -112,10 +110,10 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             # neg_adj = torch.bernoulli(neg_adj)
             #pos_adj = rescale_adj(pos_adj)
             # neg_x.requires_grad = True
-            neg_adj.requires_grad = True
+            # neg_adj.requires_grad = True
             
             
-            requires_grad(parameters, False)
+            requires_grad(parameters, False) # only interested in the gradients of the input.
             model.eval()
             
 
@@ -126,13 +124,12 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             noise_adj = torch.randn(neg_adj.shape[0], 1, n_atom * n_atom - n_atom, device=device)  #(128, 4, 9, 9) 
             neg_adjs = []
             for k in range(args.sample_step):
-
+                neg_adj.requires_grad = True
                 neg_out = model(pos_x, rel_rec, rel_send, neg_adj)
 
                 #neg_out.sum().backward() #CFL compute derivatives over a scalar (loss)
                 #Compute gradient neg_adj
-                adj_grad, = torch.autograd.grad([neg_out.sum()],[neg_adj], create_graph=True)
-
+                adj_grad, = torch.autograd.grad([neg_out.sum()],[neg_adj], create_graph=True) # Computes and returns the sum of gradients of outputs with respect to the inputs.
                 #Step
                 neg_adj = neg_adj - args.step_size * adj_grad
                 
@@ -146,11 +143,11 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
                 
                 #Delete gradients
                 neg_adj = neg_adj.detach()
-                neg_adj.requires_grad = True
             
 
             model.train()
             model.zero_grad()
+            requires_grad(parameters, True)
             #Energy of positive and negative adjacency
             #TODO: Try with binary negative adjacency instead of uniform noise
             pos_out = model(pos_x, rel_rec, rel_send, pos_adj)
@@ -198,6 +195,8 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         losses_val = []
         losses_val_mse = []
         accuracies_val = []
+        auroc_val = []
+
 
         #requires_grad(parameters, False)
         model.eval()
@@ -251,7 +250,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             loss_mse = torch.pow(neg_adj- pos_adj, 2).mean()
 
 
-            loss = loss_mse  + loss_en + args.alpha * loss_reg 
+            loss = loss_bce  + loss_en + args.alpha * loss_reg 
                     
             losses_val_bce.append(loss_bce.detach())
             losses_val_mse.append(loss_mse.detach())
@@ -283,10 +282,6 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         print('==========================================')
         #tensorboard
         writer.add_scalar('train/loss', (sum(losses)/len(losses)).item(), epoch * len(train_dataloader))
-        print('len(train_dataloader) =', len(train_dataloader))
-        print('len(losses) =', len(losses))
-
-        
         writer.add_scalar('train/Energy loss', (sum(losses_en)/len(losses_en)).item(), epoch * len(train_dataloader))
         writer.add_scalar('train/Regularizer loss', (sum(losses_reg)/len(losses_reg)).item(), epoch * len(train_dataloader))
         writer.add_scalar('train/MSE loss', (sum(losses_mse)/len(losses_mse)).item(), epoch * len(train_dataloader))
