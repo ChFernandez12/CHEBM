@@ -14,10 +14,10 @@ class MLPEncoder(Encoder):
         self.mlp2 = MLP(n_hid * 2, n_hid, n_hid, do_prob, args.no_spectral)
         self.mlp3 = MLP(n_hid, n_hid, n_hid, do_prob, args.no_spectral)
         if self.factor:
-            self.mlp4 = MLP(n_hid * 3, n_hid, n_hid, do_prob)
+            self.mlp4 = MLP(n_hid * 3, n_hid, n_hid, do_prob, args.no_spectral)
             print("Using factor graph MLP encoder.")
         else:
-            self.mlp4 = MLP(n_hid * 2, n_hid, n_hid, do_prob)
+            self.mlp4 = MLP(n_hid * 2, n_hid, n_hid, do_prob, args.no_spectral)
             print("Using MLP encoder.")
         if args.no_spectral:
             self.fc_out = nn.Linear(n_hid, 1)
