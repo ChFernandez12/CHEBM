@@ -26,7 +26,7 @@ from utils import arg_parser, logger, data_loader, forward_pass_and_eval
 from model import utils, model_loader
 
 import datetime
-
+import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 # from tensorboard.plugins.hparams import api as hp #TODO
 
@@ -65,6 +65,36 @@ def clip_grad(parameters, optimizer):
                 bound = 3 * torch.sqrt(exp_avg_sq / (1 - beta2 ** step)) + 0.1
                 p.grad.data.copy_(torch.max(torch.min(p.grad.data, bound), -bound))
 
+
+def get_trajectory_figure(data, relations):
+    fig = plt.figure()
+    axes = plt.gca()
+    lims = None
+    if lims is not None:
+        axes.set_xlim([lims[0], lims[1]])
+        axes.set_ylim([lims[0], lims[1]])
+
+    # state = state[b_idx].permute(1, 2, 0).cpu().detach().numpy()
+    data = data.cpu().detach().numpy()
+    print(data.shape)
+    loc, vel = data[:, :,:2], data[:, :,2:] #(5,49,2)
+    vel_norm = np.sqrt((vel ** 2).sum(axis=1))
+    
+    for i in range(loc.shape[0]):
+        plt.plot(loc[i, :, 0], loc[i, :, 1])
+        plt.plot(loc[i, -1, 0], loc[i, -1, 1], 'd')
+
+    # if plot_type == 'vel' or plot_type == 'both':
+    #     for i in range(loc.shape[-1]):
+    #         acc_pos = loc[0, 0:1, 0, i], loc[0, 0:1, 1, i]
+    #         vels = vel[0, :, 0, i], vel[0, :, 1, i]
+    #         for t in range(loc.shape[1] - 1):
+    #             acc_pos = np.concatenate([acc_pos[0], acc_pos[0][t:t+1]+vels[0][t:t+1]]), \
+    #                       np.concatenate([acc_pos[1], acc_pos[1][t:t+1]+vels[1][t:t+1]])
+    #         plt.plot(acc_pos[0], acc_pos[1])
+    #         plt.plot(loc[0, 0, 0, i], loc[0, 0, 1, i], 'd')
+
+    return plt, fig
 
 def train(model, train_dataloader, valid_dataloader, n_atom, device):
     parameters = model.parameters()
@@ -187,7 +217,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             auroc.append(utils.calc_auroc(neg_adj,pos_adj ))
 
 
-            #scheduler.step()  
+        # scheduler.step()  
                   
         ######## VALIDATION ########
 
@@ -300,7 +330,9 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         writer.add_scalar('val/accuracy', (sum(accuracies_val)/len(accuracies_val)).item(), epoch * len(valid_dataloader) )
         writer.add_scalar('val/BCE loss', (sum(losses_val_bce)/len(losses_val_bce)).item(), epoch * len(valid_dataloader) )
         writer.add_scalar('val/AUROC', (sum(auroc_val)/len(auroc_val)).item(), epoch * len(valid_dataloader) )
-        
+
+        writer.add_figure('GT', get_trajectory_figure(data[random.randint(0,200)], relations)[1], epoch * len(valid_dataloader))
+        # writer.add_figure('test_manip_gt', get_trajectory_figure(feat, b_idx=b_idx, lims=[-limneg, limpos], plot_type =FLAGS.plot_attr)[1]), step)
 
 
 
