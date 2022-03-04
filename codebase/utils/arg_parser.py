@@ -280,6 +280,12 @@ def parse_args():
         default=False,
         help="Disables factor graph model.",
     )
+    parser.add_argument(
+        "--no_spectral",
+        action="store_true",
+        default=False,
+        help="Disables factor graph model.",
+    )
 
 
     args = parser.parse_args()

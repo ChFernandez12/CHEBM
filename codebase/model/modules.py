@@ -69,16 +69,23 @@ def spectral_norm(module, init=True, std=1, bound=False):
 class MLP(nn.Module):
     """Based on https://github.com/ethanfetaya/NRI (MIT License)."""
 
-    def __init__(self, n_in, n_hid, n_out, do_prob=0.0, use_batch_norm=True, final_linear=False):
+    def __init__(self, n_in, n_hid, n_out, do_prob=0.0, use_batch_norm=True, final_linear=False, no_spectral=True):
         super(MLP, self).__init__()
-        self.fc1 = spectral_norm(nn.Linear(n_in, n_hid))
-        self.fc2 = spectral_norm(nn.Linear(n_hid, n_out))
+        if no_spectral:
+            self.fc1 = nn.Linear(n_in, n_hid)
+            self.fc2 = nn.Linear(n_hid, n_out)
+        else:
+            self.fc1 = spectral_norm(nn.Linear(n_in, n_hid))
+            self.fc2 = spectral_norm(nn.Linear(n_hid, n_out))
         self.bn = nn.BatchNorm1d(n_out)
         self.dropout_prob = do_prob
         self.use_batch_norm = use_batch_norm
         self.final_linear = final_linear
         if self.final_linear:
-            self.fc_final = spectral_norm(nn.Linear(n_out, n_out))
+            if no_spectral:
+                self.fc_final = nn.Linear(n_out, n_out)
+            else:
+                self.fc_final = spectral_norm(nn.Linear(n_out, n_out))
 
         self.init_weights()
 

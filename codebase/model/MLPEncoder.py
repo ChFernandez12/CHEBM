@@ -10,16 +10,19 @@ class MLPEncoder(Encoder):
     def __init__(self, args, n_in, n_hid, n_out, do_prob=0.0, factor=True):
         super().__init__(args, factor)
 
-        self.mlp1 = MLP(n_in, n_hid, n_hid, do_prob)
-        self.mlp2 = MLP(n_hid * 2, n_hid, n_hid, do_prob)
-        self.mlp3 = MLP(n_hid, n_hid, n_hid, do_prob)
+        self.mlp1 = MLP(n_in, n_hid, n_hid, do_prob, args.no_spectral)
+        self.mlp2 = MLP(n_hid * 2, n_hid, n_hid, do_prob, args.no_spectral)
+        self.mlp3 = MLP(n_hid, n_hid, n_hid, do_prob, args.no_spectral)
         if self.factor:
             self.mlp4 = MLP(n_hid * 3, n_hid, n_hid, do_prob)
             print("Using factor graph MLP encoder.")
         else:
             self.mlp4 = MLP(n_hid * 2, n_hid, n_hid, do_prob)
             print("Using MLP encoder.")
-        self.fc_out = spectral_norm(nn.Linear(n_hid, 1))
+        if args.no_spectral:
+            self.fc_out = nn.Linear(n_hid, 1)
+        else:
+            self.fc_out = spectral_norm(nn.Linear(n_hid, 1))
 
         self.init_weights()
 
@@ -43,8 +46,9 @@ class MLPEncoder(Encoder):
             x = torch.cat((x, x_skip), dim=2)  # Skip connection 
             x = self.mlp4(x)
         else:
+            x = self.edge2node_adj(x, rel_rec, adj)
             x = self.mlp3(x)
-            x = torch.cat((x, x_skip), dim=2)  # Skip connection
-            x = self.mlp4(x)
+            # x = torch.cat((x, x_skip), dim=2)  # Skip connection
+            # x = self.mlp4(x)
         x = x.sum(1) #Sum node featues
         return self.fc_out(x)
