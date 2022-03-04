@@ -117,7 +117,7 @@ def test(model, test_dataloader, n_atom, device):
         
         t_end = time.time()
         print('Epoch: {:03d}, Loss: {}, Energy Loss: {}, Regularizer Loss: {:.6f}, MSE Loss: {},  Sec/Epoch: {:.2f}'.format(epoch+1, (sum(losses_val)/len(losses_val)).item(), (sum(losses_val_en)/len(losses_val_en)).item(), (sum(losses_val_reg)/len(losses_val_reg)).item(), (sum(losses_val_mse)/len(losses_val_mse)).item(), t_end-t_start))
-
+        print('Epoch: {:03d}, ACC: {}, AUROC: {}'.format(epoch+1, (sum(accuracies_val)/len(accuracies_val)).item(), (sum(auroc_val)/len(auroc_val)).item()))
         
 
 

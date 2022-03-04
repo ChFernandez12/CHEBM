@@ -65,10 +65,14 @@ def clip_grad(parameters, optimizer):
                 bound = 3 * torch.sqrt(exp_avg_sq / (1 - beta2 ** step)) + 0.1
                 p.grad.data.copy_(torch.max(torch.min(p.grad.data, bound), -bound))
 
-        
+
 def train(model, train_dataloader, valid_dataloader, n_atom, device):
     parameters = model.parameters()
     optimizer = Adam(parameters, lr=args.lr, betas=(0.0, 0.999), weight_decay=args.wd)
+
+    # if args.load_folder:
+    #     epoch = 2999
+    #     model.load_state_dict(torch.load( os.path.join(args.save_dir + '/bce_requirepar_negF' , 'epoch_{}.pt'.format(epoch))))
 
     # scheduler = lr_scheduler.StepLR(
     #     optimizer, step_size=args.lr_decay, gamma=args.gamma
@@ -183,8 +187,8 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             auroc.append(utils.calc_auroc(neg_adj,pos_adj ))
 
 
-        #scheduler.step()
-        
+            #scheduler.step()  
+                  
         ######## VALIDATION ########
 
         t_start = time.time()
