@@ -26,10 +26,11 @@ from utils import arg_parser, logger, data_loader, forward_pass_and_eval
 from model import utils, model_loader
 
 import datetime
-
+# import networkx as nx
+import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 # from tensorboard.plugins.hparams import api as hp #TODO
-
+from matplotlib.patches import ConnectionPatch
 ### Args
 
 def tab_printer(args):
@@ -64,6 +65,71 @@ def clip_grad(parameters, optimizer):
 
                 bound = 3 * torch.sqrt(exp_avg_sq / (1 - beta2 ** step)) + 0.1
                 p.grad.data.copy_(torch.max(torch.min(p.grad.data, bound), -bound))
+
+
+def get_trajectory_figure(data):
+    fig = plt.figure()
+    axes = plt.gca()
+    lims = None
+    if lims is not None:
+        axes.set_xlim([lims[0], lims[1]])
+        axes.set_ylim([lims[0], lims[1]])
+
+    # state = state[b_idx].permute(1, 2, 0).cpu().detach().numpy()
+    data = data.cpu().detach().numpy()
+    print(data.shape)
+    loc, vel = data[:, :,:2], data[:, :,2:] #(5,49,2)
+    vel_norm = np.sqrt((vel ** 2).sum(axis=1))
+    
+    for i in range(loc.shape[0]):
+        plt.plot(loc[i, :, 0], loc[i, :, 1], label = str(i))
+        plt.plot(loc[i, -1, 0], loc[i, -1, 1], 'd')
+    plt.legend()
+    return plt, fig
+
+def get_graph_figure(data, relations, obj):
+    data = data.cpu().detach().numpy()
+    loc, vel = data[:, :,:2], data[:, :,2:]
+
+    fig = plt.figure()
+    axes = plt.gca()
+    # G = nx.DiGraph()
+    relations = relations.cpu().detach().numpy()
+    idx1 = 0
+    idx2 = 0
+
+    for i in range(obj): 
+        for j in range( obj): 
+            if idx1 % (obj + 1) == 0:
+                idx1 += 1
+                continue
+            if relations[idx2] > 0.5: 
+                # plt.arrow(loc[i, -1, 0], loc[i, -1, 1], loc[j, -1, 0] - loc[i, -1, 0], loc[j, -1, 1] - loc[i, -1, 1], width = 0.00001, head_width = 0.005, linestyle = ':')
+                xyA = (loc[i, -1, 0], loc[i, -1, 1])
+                xyB = (loc[j, -1, 0], loc[j, -1, 1])
+                coordsA = "data"
+                coordsB = "data"
+                con = ConnectionPatch(xyA, xyB, coordsA, coordsB,
+                                    arrowstyle="-|>", shrinkA=5, shrinkB=5,
+                                    mutation_scale=20, fc="w")
+                axes.add_artist(con)
+                # G.add_edge(i,j)
+            idx2 += 1
+            idx1 += 1
+    # axes.set_ylim([min(loc[:, -1, 1]), max(loc[:, -1, 1])])
+    # axes.set_xlim([min(loc[:, -1, 1]), max(loc[:, -1, 1]) ])
+
+
+
+    for i in range(loc.shape[0]):
+        plt.plot(loc[i, -1, 0], loc[i, -1, 1], label = str(i))
+    # nx.draw_spring(G, with_labels = True)
+
+
+   
+
+    return plt, fig
+
 
 
 def train(model, train_dataloader, valid_dataloader, n_atom, device):
@@ -187,7 +253,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             auroc.append(utils.calc_auroc(neg_adj,pos_adj ))
 
 
-            #scheduler.step()  
+        # scheduler.step()  
                   
         ######## VALIDATION ########
 
@@ -300,8 +366,13 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
         writer.add_scalar('val/accuracy', (sum(accuracies_val)/len(accuracies_val)).item(), epoch * len(valid_dataloader) )
         writer.add_scalar('val/BCE loss', (sum(losses_val_bce)/len(losses_val_bce)).item(), epoch * len(valid_dataloader) )
         writer.add_scalar('val/AUROC', (sum(auroc_val)/len(auroc_val)).item(), epoch * len(valid_dataloader) )
-        
 
+
+        # FIGURES 
+        rnd_ex = random.randint(0,200)
+        writer.add_figure('GT', get_trajectory_figure(data[rnd_ex])[1], epoch * len(valid_dataloader))
+        writer.add_figure('GRAPH_gt', get_graph_figure(data[rnd_ex], relations[rnd_ex], data.shape[1] )[1], epoch * len(valid_dataloader))
+        writer.add_figure('GRAPH_pred', get_graph_figure(data[rnd_ex], neg_adj[rnd_ex,0,:], data.shape[1] )[1], epoch * len(valid_dataloader))
 
 
 
