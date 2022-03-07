@@ -119,14 +119,9 @@ def get_graph_figure(data, relations, obj):
     # axes.set_ylim([min(loc[:, -1, 1]), max(loc[:, -1, 1])])
     # axes.set_xlim([min(loc[:, -1, 1]), max(loc[:, -1, 1]) ])
 
-
-
     for i in range(loc.shape[0]):
         plt.plot(loc[i, -1, 0], loc[i, -1, 1], label = str(i))
     # nx.draw_spring(G, with_labels = True)
-
-
-   
 
     return plt, fig
 
@@ -140,9 +135,9 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
     #     epoch = 2999
     #     model.load_state_dict(torch.load( os.path.join(args.save_dir + '/bce_requirepar_negF' , 'epoch_{}.pt'.format(epoch))))
 
-    # scheduler = lr_scheduler.StepLR(
-    #     optimizer, step_size=args.lr_decay, gamma=args.gamma
-    # )
+    scheduler = lr_scheduler.StepLR(
+        optimizer, step_size=args.lr_decay, gamma=args.gamma
+    )
     #TODO: call train for each epoch
     for epoch in range(args.max_epochs):
         t_start = time.time()
@@ -253,7 +248,7 @@ def train(model, train_dataloader, valid_dataloader, n_atom, device):
             auroc.append(utils.calc_auroc(neg_adj,pos_adj ))
 
 
-        # scheduler.step()  
+        scheduler.step()  
                   
         ######## VALIDATION ########
 

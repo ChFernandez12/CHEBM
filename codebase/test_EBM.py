@@ -26,8 +26,68 @@ from utils import arg_parser, logger, data_loader, forward_pass_and_eval
 from model import utils, model_loader
 
 import datetime
-
+import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
+from matplotlib.patches import ConnectionPatch
+
+def get_trajectory_figure(data):
+    fig = plt.figure()
+    axes = plt.gca()
+    lims = None
+    if lims is not None:
+        axes.set_xlim([lims[0], lims[1]])
+        axes.set_ylim([lims[0], lims[1]])
+
+    # state = state[b_idx].permute(1, 2, 0).cpu().detach().numpy()
+    data = data.cpu().detach().numpy()
+    print(data.shape)
+    loc, vel = data[:, :,:2], data[:, :,2:] #(5,49,2)
+    vel_norm = np.sqrt((vel ** 2).sum(axis=1))
+    
+    for i in range(loc.shape[0]):
+        plt.plot(loc[i, :, 0], loc[i, :, 1], label = str(i))
+        plt.plot(loc[i, -1, 0], loc[i, -1, 1], 'd')
+    plt.legend()
+    return plt, fig
+
+def get_graph_figure(data, relations, obj):
+    data = data.cpu().detach().numpy()
+    loc, vel = data[:, :,:2], data[:, :,2:]
+
+    fig = plt.figure()
+    axes = plt.gca()
+    # G = nx.DiGraph()
+    relations = relations.cpu().detach().numpy()
+    idx1 = 0
+    idx2 = 0
+
+    for i in range(obj): 
+        for j in range( obj): 
+            if idx1 % (obj + 1) == 0:
+                idx1 += 1
+                continue
+            if relations[idx2] > 0.5: 
+                # plt.arrow(loc[i, -1, 0], loc[i, -1, 1], loc[j, -1, 0] - loc[i, -1, 0], loc[j, -1, 1] - loc[i, -1, 1], width = 0.00001, head_width = 0.005, linestyle = ':')
+                xyA = (loc[i, -1, 0], loc[i, -1, 1])
+                xyB = (loc[j, -1, 0], loc[j, -1, 1])
+                coordsA = "data"
+                coordsB = "data"
+                con = ConnectionPatch(xyA, xyB, coordsA, coordsB,
+                                    arrowstyle="-|>", shrinkA=5, shrinkB=5,
+                                    mutation_scale=20, fc="w")
+                axes.add_artist(con)
+                # G.add_edge(i,j)
+            idx2 += 1
+            idx1 += 1
+    # axes.set_ylim([min(loc[:, -1, 1]), max(loc[:, -1, 1])])
+    # axes.set_xlim([min(loc[:, -1, 1]), max(loc[:, -1, 1]) ])
+
+    for i in range(loc.shape[0]):
+        plt.plot(loc[i, -1, 0], loc[i, -1, 1], label = str(i))
+    # nx.draw_spring(G, with_labels = True)
+
+    return plt, fig
+
 
 def test(model, test_dataloader, n_atom, device):
        ######## TEST ########
@@ -59,6 +119,9 @@ def test(model, test_dataloader, n_atom, device):
             #TODO binaritzar adj edges
             noise_adj = torch.randn(neg_adj.shape[0], 1, n_atom * n_atom - n_atom, device=device)  #(128, 4, 9, 9) 
             neg_adjs = []
+            rnd_ex = 1 
+            writer.add_figure('GRAPH_pred_steps', get_graph_figure(data[rnd_ex], neg_adj[rnd_ex,0,:], data.shape[1] )[1], 0)
+
             for k in range(args.valid_sample_step):
 
                 neg_out = model(pos_x, rel_rec, rel_send, neg_adj)
@@ -68,7 +131,8 @@ def test(model, test_dataloader, n_atom, device):
 
                 #Step
                 neg_adj = neg_adj - args.step_size * adj_grad
-                
+                writer.add_figure('GRAPH_pred_steps', get_graph_figure(data[rnd_ex], neg_adj[rnd_ex,0,:], data.shape[1] )[1], rnd_ex + k)
+
                 #TODO: Change temperature
                 # neg_adj = torch.clamp(neg_adj, 0, 1)
                 neg_adj= torch.sigmoid( neg_adj * 10)
@@ -120,12 +184,22 @@ def test(model, test_dataloader, n_atom, device):
         print('Epoch: {:03d}, ACC: {}, AUROC: {}'.format(epoch+1, (sum(accuracies_val)/len(accuracies_val)).item(), (sum(auroc_val)/len(auroc_val)).item()))
         
 
+        # FIGURES 
+        for rnd_ex in range(0,30):
+        # rnd_ex = random.randint(0,200)
+            writer.add_figure('GT', get_trajectory_figure(data[rnd_ex])[1], rnd_ex)
+            writer.add_figure('GRAPH_gt', get_graph_figure(data[rnd_ex], relations[rnd_ex], data.shape[1] )[1], rnd_ex)
+            writer.add_figure('GRAPH_pred', get_graph_figure(data[rnd_ex], neg_adj[rnd_ex,0,:], data.shape[1] )[1], rnd_ex)
+
+
+
 
 
 
 
 if __name__ == '__main__':
-    epoch = 2344
+    epoch = 2981
+
     args = arg_parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -181,8 +255,8 @@ if __name__ == '__main__':
     model.load_state_dict(torch.load( os.path.join(args.save_dir + '/' + args.expername , 'epoch_{}.pt'.format(epoch))))
     
     # description = 'energy_bce_1e3'
-    # dt_string = datetime.datetime.now().strftime("%d%m%Y_%H%M%S")
-    # writer = SummaryWriter('runs/{}/{}'.format(args.expername,dt_string))
+    dt_string = datetime.datetime.now().strftime("%d%m%Y_%H%M%S")
+    writer = SummaryWriter('runs/test/{}/{}'.format(args.expername,dt_string))
     # writer.add_graph(model)
     
 
@@ -190,7 +264,8 @@ if __name__ == '__main__':
     #     os.makedirs(args.save_dir+ '/' + args.expername)
     
     ### Train
-    test(model, test_loader, n_atom, device)
+    test(model, valid_loader, n_atom, device)
+    print('REMEMBER to change train min max')
     print('FI')
-    # writer.close()
+    writer.close()
     
